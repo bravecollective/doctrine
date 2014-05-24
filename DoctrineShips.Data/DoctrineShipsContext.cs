@@ -7,7 +7,7 @@
     public class DoctrineShipsContext : DbContextBase
     {
         public DoctrineShipsContext() :
-            base("name=DoctrineShipsDb")
+            base("name=DoctrineShipsBCDb")
         {
             //Database.SetInitializer<DoctrineShipsContext>(new DropCreateDatabaseAlways<DoctrineShipsContext>());
             Database.SetInitializer<DoctrineShipsContext>(null);
@@ -29,6 +29,8 @@
             modelBuilder.Configurations.Add(new ComponentMap());
             modelBuilder.Configurations.Add(new ContractMap());
             modelBuilder.Configurations.Add(new CustomerMap());
+            modelBuilder.Configurations.Add(new DoctrineMap());
+            modelBuilder.Configurations.Add(new DoctrineShipFitMap());
             modelBuilder.Configurations.Add(new LogMessageMap());
             modelBuilder.Configurations.Add(new NotificationRecipientMap());
             modelBuilder.Configurations.Add(new SalesAgentMap());
@@ -36,7 +38,6 @@
             modelBuilder.Configurations.Add(new ShipFitComponentMap());
             modelBuilder.Configurations.Add(new ShipFitMap());
             modelBuilder.Configurations.Add(new ShortUrlMap());
-            modelBuilder.Configurations.Add(new SubscriptionPlanMap());
         }
     }
 }

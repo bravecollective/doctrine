@@ -23,9 +23,7 @@
         Account AddAccount(Account account);
         Account CreateAccount(Account account);
         Account GetAccount(int accountId);
-        int GetAccountsSubscriptionPlanCount(int subscriptionPlanId);
         IEnumerable<Account> GetAccounts();
-        IEnumerable<Account> GetDueAccounts(TimeSpan duePeriod);
         IEnumerable<Account> GetAccountsForNotifications();
 
         // Article Operations.
@@ -55,6 +53,7 @@
         IEnumerable<Contract> GetContracts();
         IEnumerable<Contract> GetAssigneeContracts(int assigneeId);
         IEnumerable<Contract> GetIssuerContracts(int salesAgentId);
+        IEnumerable<Contract> GetShipFitContracts(int shipFitId);
         HashSet<long> GetSalesAgentContractIds(int salesAgentId, bool isCorp = false);
         Dictionary<int, int> GetContractShipFitCounts();
         Dictionary<long, int> GetContractSalesAgentCounts();
@@ -68,6 +67,7 @@
         IEnumerable<SalesAgent> GetSalesAgents(int accountId);
         IEnumerable<SalesAgent> GetSalesAgentsForContractCount();
         IEnumerable<SalesAgent> GetSalesAgentsForRefresh(bool force, int batchSize = 10);
+        void DeleteStaleSalesAgents(DateTime olderThanDate);
 
         // Setting Profile Operations.
         void DeleteSettingProfile(int settingProfileId);
@@ -124,15 +124,6 @@
         ShipFitComponent GetShipFitComponent(int shipFitComponentId);
         IEnumerable<ShipFitComponent> GetShipFitComponents(int shipFitId);
 
-        // Subscription Plan Operations.
-        void DeleteSubscriptionPlan(int subscriptionPlanId);
-        void UpdateSubscriptionPlan(SubscriptionPlan subscriptionPlan);
-        SubscriptionPlan AddSubscriptionPlan(SubscriptionPlan subscriptionPlan);
-        SubscriptionPlan CreateSubscriptionPlan(SubscriptionPlan subscriptionPlan);
-        SubscriptionPlan GetSubscriptionPlan(int subscriptionPlanId);
-        SubscriptionPlan GetSubscriptionPlanReadOnly(int subscriptionPlanId);
-        IEnumerable<SubscriptionPlan> GetSubscriptionPlans();
-
         // ShortUrl Operations.
         void DeleteShortUrl(string shortUrlId);
         void UpdateShortUrl(ShortUrl shortUrl);
@@ -141,6 +132,26 @@
         ShortUrl GetShortUrl(string shortUrlId);
         IEnumerable<ShortUrl> GetShortUrls();
         void DeleteShortUrlsOlderThanDate(DateTime olderThanDate);
+
+        // Doctrine Operations.
+        void DeleteDoctrine(int doctrineId);
+        void DeleteDoctrinesByAccountId(int accountId);
+        void UpdateDoctrine(Doctrine doctrine);
+        Doctrine AddDoctrine(Doctrine doctrine);
+        Doctrine CreateDoctrine(Doctrine doctrine);
+        Doctrine GetDoctrine(int doctrineId);
+        IEnumerable<Doctrine> GetDoctrines();
+        IEnumerable<Doctrine> GetDoctrinesForAccount(int accountId);
+
+        // DoctrineShipFit Operations.
+        void DeleteDoctrineShipFit(int doctrineShipFitId);
+        void DeleteDoctrineShipFitsByDoctrineId(int doctrineId);
+        void DeleteDoctrineShipFitsByShipFitId(int shipFitId);
+        void UpdateDoctrineShipFit(DoctrineShipFit doctrineShipFit);
+        DoctrineShipFit AddDoctrineShipFit(DoctrineShipFit doctrineShipFit);
+        DoctrineShipFit CreateDoctrineShipFit(DoctrineShipFit doctrineShipFit);
+        DoctrineShipFit GetDoctrineShipFit(int doctrineShipFitId);
+        IEnumerable<DoctrineShipFit> GetDoctrineShipFits(int doctrineId);
 
         // Misc Operations.
         void Save();

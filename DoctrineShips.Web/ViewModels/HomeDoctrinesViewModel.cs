@@ -3,8 +3,8 @@
     using System.Collections.Generic;
     using DoctrineShips.Entities;
 
-    public class HomeSubscriptionsViewModel
+    public class HomeDoctrinesViewModel
     {
-        public IEnumerable<SubscriptionPlan> SubscriptionPlans { get; set; }
+        public IEnumerable<Doctrine> Doctrines { get; set; }
     }
 }

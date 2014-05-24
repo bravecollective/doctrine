@@ -80,17 +80,17 @@
         IValidationResult SettingProfile(SettingProfile settingProfile);
 
         /// <summary>
-        /// Check that the passed subscription plan is valid and ready to be written to the database.
-        /// </summary>
-        /// <param name="subscriptionPlan">A doctrine ships SubscriptionPlan object.</param>
-        /// <returns>Returns an IValidationResult.</returns>
-        IValidationResult SubscriptionPlan(SubscriptionPlan subscriptionPlan);
-
-        /// <summary>
         /// Check that the passed notification recipient is valid and ready to be written to the database.
         /// </summary>
         /// <param name="notificationRecipient">A doctrine ships NotificationRecipient object.</param>
         /// <returns>Returns an IValidationResult.</returns>
         IValidationResult NotificationRecipient(NotificationRecipient notificationRecipient);
+
+        /// <summary>
+        /// Check that the passed doctrine is valid and ready to be written to the database.
+        /// </summary>
+        /// <param name="doctrine">A doctrine ships Doctrine object.</param>
+        /// <returns>Returns an IValidationResult.</returns>
+        IValidationResult Doctrine(Doctrine doctrine);
     }
 }

@@ -2,14 +2,13 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Reflection;
     using System.Threading.Tasks;
     using DoctrineShips.Entities;
     using DoctrineShips.Repository;
+    using DoctrineShips.Service.Entities;
     using DoctrineShips.Service.Managers;
     using DoctrineShips.Validation;
     using EveData;
-    using LinqToTwitter = LinqToTwitter;
     using Tools;
 
     /// <summary>
@@ -21,6 +20,7 @@
         private readonly IDoctrineShipsRepository doctrineShipsRepository;
         private readonly IEveDataSource eveDataSource;
         private readonly IDoctrineShipsValidation doctrineShipsValidation;
+        private readonly IDoctrineShipsSettings doctrineShipsSettings;
         private readonly ISystemLogger logger;
 
         // Internal Dependencies (Instantiated On-Demand By Accessors).
@@ -39,12 +39,24 @@
         /// <param name="eveDataSource">An IEveDataSource instance.</param>
         /// <param name="doctrineShipsValidation">An IDoctrineShips Validation instance.</param>
         /// <param name="logger">An ISystemLogger logger instance.</param>
-        public DoctrineShipsServices(IDoctrineShipsRepository doctrineShipsRepository, IEveDataSource eveDataSource, IDoctrineShipsValidation doctrineShipsValidation, ISystemLogger logger)
+        public DoctrineShipsServices(IDoctrineShipsRepository doctrineShipsRepository, IEveDataSource eveDataSource, IDoctrineShipsValidation doctrineShipsValidation, IDoctrineShipsSettings doctrineShipsSettings, ISystemLogger logger)
         {
             this.doctrineShipsRepository = doctrineShipsRepository;
             this.eveDataSource = eveDataSource;
             this.doctrineShipsValidation = doctrineShipsValidation;
+            this.doctrineShipsSettings = doctrineShipsSettings;
             this.logger = logger;
+        }
+
+        /// <summary>
+        /// Doctrine Ships application settings.
+        /// </summary>
+        public IDoctrineShipsSettings Settings 
+        { 
+            get
+            {
+                return this.doctrineShipsSettings;
+            }
         }
 
         /// <summary>
@@ -243,6 +255,16 @@
         }
 
         /// <summary>
+        /// Returns a list of contracts for a given ship fit.
+        /// </summary>
+        /// <param name="shipFitId">The id of the ship fit for which contracts should be returned.</param>
+        /// <returns>A list of ship fit contract objects.</returns>
+        public IEnumerable<Contract> GetShipFitContracts(int shipFitId)
+        {
+            return ShipFitManager.GetShipFitContracts(shipFitId);
+        }
+
+        /// <summary>
         /// Fetches and returns a Doctrine Ships sales agent.
         /// </summary>
         /// <param name="salesAgentId">The id of the sales agent for which a sales agent object should be returned.</param>
@@ -335,8 +357,7 @@
         /// <summary>
         /// Perform daily maintenance tasks.
         /// </summary>
-        /// <param name="twitterContext">A twitter context for the sending of messages.</param>
-        public async Task DailyMaintenance(LinqToTwitter::TwitterContext twitterContext)
+        public async Task DailyMaintenance()
         {
             // Delete any contracts where the expired date has passed.
             ContractManager.DeleteExpiredContracts();
@@ -347,26 +368,20 @@
             // Deletes short urls older than 30 days.
             TaskManager.DeleteOldShortUrls();
 
-            // Debit any accounts with subscription payments that are due.
-            AccountManager.DebitDueAccounts();
+            // Deletes active sales agents that have not had a successful contract refresh in the last 7 days.
+            SalesAgentManager.DeleteStaleSalesAgents();
 
             // Send out daily ship fit availability summaries for all accounts.
-            await TaskManager.SendDailySummary(twitterContext);
+            await TaskManager.SendDailySummary(doctrineShipsSettings.TwitterContext);
         }
 
         /// <summary>
         /// Perform hourly maintenance tasks.
         /// </summary>
-        /// <param name="corpApiId">A valid eve api id (keyID) for the Doctrine Ships in-game corporation.</param>
-        /// <param name="corpApiKey">A valid eve api key (vCode) for the Doctrine Ships in-game corporation.</param>
-        /// <param name="twitterContext">A twitter context for the sending of messages.</param>
-        public async Task HourlyMaintenance(int corpApiId, string corpApiKey, LinqToTwitter::TwitterContext twitterContext)
+        public async Task HourlyMaintenance()
         {
-            // Credit any accounts where payments have been made to the corporate wallet.
-            AccountManager.CreditAccountPayments(corpApiId, corpApiKey);
-
             // Send out any ship fit availability alerts for all accounts.
-            await TaskManager.SendAvailabilityAlert(twitterContext);
+            await TaskManager.SendAvailabilityAlert(doctrineShipsSettings.TwitterContext);
         }
 
         /// <summary>
@@ -382,13 +397,12 @@
         /// <para>Adds an account with a default setting profile and an account admin access code.</para>
         /// </summary>
         /// <param name="description">A short description for the new account.</param>
-        /// <param name="subscriptionPlanId">The subscription plan for the new account.</param>
         /// <param name="generatedKey">An out string parameter containing the account admin key or an emptry string on failure.</param>
         /// <param name="newAccountId">An out int parameter containing the new account id or 0 on failure.</param>
         /// <returns>Returns a validation result object.</returns>
-        public IValidationResult AddAccount(string description, int subscriptionPlanId, out string generatedKey, out int newAccountId)
+        public IValidationResult AddAccount(string description, out string generatedKey, out int newAccountId)
         {
-            return AccountManager.AddAccount(description, subscriptionPlanId, out generatedKey, out newAccountId);
+            return AccountManager.AddAccount(description, out generatedKey, out newAccountId);
         }
 
         /// <summary>
@@ -419,7 +433,17 @@
                     validationResult.AddError(salesAgent.SalesAgentId.ToString(), "Error while deleting sales agent: " + salesAgent.SalesAgentId.ToString());
                 }
             }
-                
+
+            // Delete all account doctrines.
+            var accountDoctrines = ShipFitManager.GetDoctrineList(accountId);
+            foreach (var doctrine in accountDoctrines)
+            {
+                if (ShipFitManager.DeleteDoctrine(accountId, doctrine.DoctrineId) == false)
+                {
+                    validationResult.AddError(doctrine.DoctrineId.ToString(), "Error while deleting doctrine: " + doctrine.DoctrineId.ToString());
+                }
+            }
+
             // Delete all account access codes.
             var accountAccessCodes = AccountManager.GetAccessCodes(accountId);
             foreach (var accessCode in accountAccessCodes)
@@ -475,15 +499,6 @@
         public IEnumerable<Account> GetAccounts()
         {
             return AccountManager.GetAccounts();
-        }
-
-        /// <summary>
-        /// Fetches and returns a list of all Doctrine Ships subscription plans.
-        /// </summary>
-        /// <returns>A list of SubscriptionPlan objects.</returns>
-        public IEnumerable<SubscriptionPlan> GetSubscriptionPlans()
-        {
-            return AccountManager.GetSubscriptionPlans();
         }
 
         /// <summary>
@@ -578,9 +593,23 @@
         /// <param name="apiKey">A valid eve api key (vCode).</param>
         /// <param name="accountId">The id of the account for which a sales agent should be added.</param>
         /// <returns>Returns a validation result object.</returns>
-        public IValidationResult AddSalesAgent(int apiId, string apiKey, int accountId)
+        public async Task<IValidationResult> AddSalesAgent(int apiId, string apiKey, int accountId)
         {
-            return SalesAgentManager.AddSalesAgent(apiId, apiKey, accountId);
+            IValidationResult validationResult;
+
+            validationResult = SalesAgentManager.AddSalesAgent(apiId, apiKey, accountId);
+            
+            // If the sales agent addition was successful, notify the account twitter account.
+            if (validationResult.IsValid)
+            {
+                SettingProfile settingProfile = AccountManager.GetAccountSettingProfile(accountId);
+
+                await TaskManager.SendDirectMessage(this.doctrineShipsSettings.TwitterContext, 
+                                                    settingProfile.TwitterHandle, 
+                                                    "A Sales Agent Was Added To Account: " + accountId);
+            }
+
+            return validationResult;
         }
 
         /// <summary>
@@ -680,37 +709,6 @@
         }
 
         /// <summary>
-        /// <para>Adds a subscription plan.</para>
-        /// </summary>
-        /// <param name="subscriptionPlan">A populated subscription plan object.</param>
-        /// <returns>Returns a validation result object.</returns>
-        public IValidationResult AddSubscriptionPlan(SubscriptionPlan subscriptionPlan)
-        {
-            return AccountManager.AddSubscriptionPlan(subscriptionPlan);
-        }
-
-        /// <summary>
-        /// Deletes a subscription plan.
-        /// </summary>
-        /// <param name="subscriptionPlanId">The id of the subscription plan being deleted.</param>
-        /// <returns>Returns true if the deletion was successful or false if not.</returns>
-        public bool DeleteSubscriptionPlan(int subscriptionPlanId)
-        {
-            return AccountManager.DeleteSubscriptionPlan(subscriptionPlanId);
-        }
-
-        /// <summary>
-        /// Updates the subscription plan for an account.
-        /// </summary>
-        /// <param name="accountId">The account Id being changed.</param>
-        /// <param name="subscriptionPlanId">The id of the new subscription plan.</param>
-        /// <returns>Returns a validation result object.</returns>
-        public IValidationResult UpdateAccountSubscriptionPlan(int accountId, int subscriptionPlanId)
-        {
-            return AccountManager.UpdateAccountSubscriptionPlan(accountId, subscriptionPlanId);
-        }
-
-        /// <summary>
         /// <para>Deletes a notification recipient from an accountId and a notificationRecipientId.</para>
         /// </summary>
         /// <param name="accountId">The account Id of the requestor. The account Id should own the notification recipient being deleted.</param>
@@ -782,6 +780,70 @@
         public string GetEftFittingString(int shipFitId, int accountId)
         {
             return ShipFitManager.GetEftFittingString(shipFitId, accountId);
+        }
+
+        /// <summary>
+        /// Returns a list of all doctrines for a given account.
+        /// </summary>
+        /// <param name="accountId">The account for which the doctrines should be returned.</param>
+        /// <returns>A list of doctrine objects.</returns>
+        public IEnumerable<Doctrine> GetDoctrineList(int accountId)
+        {
+            return ShipFitManager.GetDoctrineList(accountId);
+        }
+
+        /// <summary>
+        /// Returns a doctrine for a given account and doctrine id.
+        /// </summary>
+        /// <param name="accountId">The currently logged-in account id for security checking.</param>
+        /// <param name="doctrineId">The id for which a doctrine object should be returned.</param>
+        /// <returns>A doctrine object.</returns>
+        public Doctrine GetDoctrineDetail(int accountId, int doctrineId)
+        {
+            return ShipFitManager.GetDoctrineDetail(accountId, doctrineId);
+        }
+
+        /// <summary>
+        /// Deletes a doctrine.
+        /// </summary>
+        /// <param name="accountId">The account Id of the requestor. The account Id should own the doctrine being deleted.</param>
+        /// <param name="doctrineId">The doctrine Id to be deleted.</param>
+        /// <returns>Returns true if the deletion was successful or false if not.</returns>
+        public bool DeleteDoctrine(int accountId, int doctrineId)
+        {
+            return ShipFitManager.DeleteDoctrine(accountId, doctrineId);
+        }
+
+        /// <summary>
+        /// <para>Adds a Doctrine.</para>
+        /// </summary>
+        /// <param name="doctrine">A populated doctrine object.</param>
+        /// <returns>Returns a validation result object.</returns>
+        public IValidationResult AddDoctrine(Doctrine doctrine)
+        {
+            return ShipFitManager.AddDoctrine(doctrine);
+        }
+
+        /// <summary>
+        /// Updates a doctrine for a particular account.
+        /// </summary>
+        /// <param name="doctrine">A partially populated doctrine object to be updated.</param>
+        /// <returns>Returns a validation result object.</returns>
+        public IValidationResult UpdateDoctrine(Doctrine doctrine)
+        {
+            return ShipFitManager.UpdateDoctrine(doctrine);
+        }
+
+        /// <summary>
+        /// Updates a doctrine ship fit list for a particular account.
+        /// </summary>
+        /// <param name="accountId">The account Id of the requestor. The account Id should own the doctrine being updated.</param>
+        /// <param name="doctrineId">The doctrine Id to be updated.</param>
+        /// <param name="doctrineShipFitIds">An array of ship fit ids to be assigned to the doctrine.</param>
+        /// <returns>Returns a validation result object.</returns>
+        public IValidationResult UpdateDoctrineShipFits(int accountId, int doctrineId, int[] doctrineShipFitIds)
+        {
+            return ShipFitManager.UpdateDoctrineShipFits(accountId, doctrineId, doctrineShipFitIds);
         }
     }
 }
