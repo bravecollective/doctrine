@@ -3,8 +3,9 @@
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Linq;
+    using System.Threading.Tasks;
     using System.Web;
-    using System.Web.Configuration;
     using System.Web.Mvc;
     using System.Web.Security;
     using System.Web.UI;
@@ -12,8 +13,8 @@
     using DevTrends.MvcDonutCaching;
     using DoctrineShips.Entities;
     using DoctrineShips.Service;
+    using DoctrineShips.Service.Entities;
     using DoctrineShips.Validation;
-    using DoctrineShips.Web.Filters;
     using DoctrineShips.Web.ViewModels;
     using Tools;
 
@@ -21,14 +22,10 @@
     public class AccountController : Controller
     {
         private readonly IDoctrineShipsServices doctrineShipsServices;
-        private readonly string secondKey;
-        private readonly string websiteDomain;
 
         public AccountController(IDoctrineShipsServices doctrineShipsServices)
         {
             this.doctrineShipsServices = doctrineShipsServices;
-            this.secondKey = WebConfigurationManager.AppSettings["SecondKey"];
-            this.websiteDomain = WebConfigurationManager.AppSettings["WebsiteDomain"];
         }
 
         [AllowAnonymous]
@@ -43,7 +40,7 @@
             string cleanRedir = Server.HtmlEncode(redir);
 
             // Was the second key passed and is it correct?
-            if (cleanSecondKey == this.secondKey)
+            if (cleanSecondKey == this.doctrineShipsServices.Settings.SecondKey)
             {
                 // Bypass the account id checks.
                 role = doctrineShipsServices.Authenticate(cleanAccountId, cleanKey, bypassAccountChecks: true);
@@ -195,7 +192,7 @@
 
         [HttpPost]
         [ValidateAntiForgeryToken()]
-        public ActionResult AddSalesAgent(AccountSalesAgentsViewModel viewModel)
+        public async Task<ActionResult> AddSalesAgent(AccountSalesAgentsViewModel viewModel)
         {
             // Convert the currently logged-in account id to an integer.
             int accountId = Conversion.StringToInt32(User.Identity.Name);
@@ -205,7 +202,7 @@
                 // Clean the passed api key.
                 string cleanApiKey = Conversion.StringToSafeString(Server.HtmlEncode(viewModel.ApiKey));
 
-                IValidationResult validationResult = this.doctrineShipsServices.AddSalesAgent(viewModel.ApiId, cleanApiKey, accountId);
+                IValidationResult validationResult = await this.doctrineShipsServices.AddSalesAgent(viewModel.ApiId, cleanApiKey, accountId);
                 
                 // If the validationResult is not valid, something did not validate in the service layer.
                 if (validationResult.IsValid)
@@ -349,7 +346,7 @@
                 if (newKey != string.Empty)
                 {
                     // Assign the new key to TempData to be passed to the AccessCodes view.
-                    string authUrl = this.websiteDomain + "/Auth/" + accountId + "/" + newKey;
+                    string authUrl = this.doctrineShipsServices.Settings.WebsiteDomain + "/A/" + accountId + "/" + newKey;
                     TempData["Status"] = "Success, the auth url is: <a href=\"" + authUrl + "\">" + authUrl + "</a>";
                 }
                 else
@@ -662,26 +659,181 @@
             }
         }
 
-        [AjaxOnly]
-        [HttpPost]
-        public ActionResult GetShipFitValues(string shipFitId)
+        public ActionResult Doctrines()
         {
-            // Cleanse the passed ship fit id string to prevent XSS.
-            int cleanShipFitId = Conversion.StringToInt32(Server.HtmlEncode(shipFitId));
+            AccountDoctrinesViewModel viewModel = new AccountDoctrinesViewModel();
 
             // Convert the currently logged-in account id to an integer.
             int accountId = Conversion.StringToInt32(User.Identity.Name);
 
-            // Populate the view model with the ship fit.
-            var shipFit = this.doctrineShipsServices.GetShipFitDetail(cleanShipFitId, accountId);
+            viewModel.Doctrines = this.doctrineShipsServices.GetDoctrineList(accountId).OrderBy(x => x.DoctrineId);
 
-            if (shipFit != null)
+            // Set the ViewBag to the TempData status value passed from the Add & Delete methods.
+            ViewBag.Status = TempData["Status"];
+
+            return View(viewModel);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken()]
+        public ActionResult AddDoctrine(AccountDoctrinesViewModel viewModel)
+        {
+            // Convert the currently logged-in account id to an integer.
+            int accountId = Conversion.StringToInt32(User.Identity.Name);
+
+            if (ModelState.IsValid)
             {
-                return Json(new { name = shipFit.Name, role = shipFit.Role, notes = shipFit.Notes });
+                // Create an Auto Mapper map between the ship fit entity and the view model.
+                Mapper.CreateMap<AccountDoctrinesViewModel, Doctrine>();
+
+                // Sanitise the form values.
+                viewModel.AccountId = accountId;
+                viewModel.Name = Conversion.StringToSafeString(viewModel.Name);
+                viewModel.Description = Conversion.StringToSafeString(viewModel.Description);
+                viewModel.ImageUrl = Server.HtmlEncode(viewModel.ImageUrl) ?? string.Empty;
+
+                // Populate a ship fit with automapper and pass it back to the service layer for update.
+                Doctrine doctrine = Mapper.Map<AccountDoctrinesViewModel, Doctrine>(viewModel);
+                IValidationResult validationResult = this.doctrineShipsServices.AddDoctrine(doctrine);
+
+                // If the validationResult is not valid, something did not validate in the service layer.
+                if (validationResult.IsValid)
+                {
+                    TempData["Status"] = "The doctrine was successfully added.";
+                }
+                else
+                {
+                    TempData["Status"] = "Error: The doctrine was not added, a validation error occured.<br /><b>Error Details: </b>";
+
+                    foreach (var error in validationResult.Errors)
+                    {
+                        TempData["Status"] += error.Value + "<br />";
+                    }
+                }
+
+                return RedirectToAction("Doctrines");
             }
             else
             {
-                return Json(new { name = "Error, Ship Fit Not Found", role = "", notes = "" });
+                // Re-populate the view model and return with any validation errors.
+                viewModel.Doctrines = this.doctrineShipsServices.GetDoctrineList(accountId).OrderBy(x => x.DoctrineId);
+                return View("~/Views/Account/Doctrines.cshtml", viewModel);
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken()]
+        public ActionResult DeleteDoctrine(AccountDoctrinesViewModel viewModel)
+        {
+            if (viewModel.RemoveList != null)
+            {
+                // Convert the currently logged-in account id to an integer.
+                int accountId = Conversion.StringToInt32(User.Identity.Name);
+
+                // Create a collection for the results of the delete operations.
+                ICollection<bool> resultList = new List<bool>();
+
+                foreach (var doctrineId in viewModel.RemoveList)
+                {
+                    resultList.Add(this.doctrineShipsServices.DeleteDoctrine(accountId, doctrineId));
+                }
+
+                // If any of the deletions failed, output an error message.
+                if (resultList.Contains(false))
+                {
+                    TempData["Status"] = "Error: One or more doctrines were not removed.";
+                }
+                else
+                {
+                    TempData["Status"] = "All selected doctrines were successfully removed.";
+                }
+            }
+
+            return RedirectToAction("Doctrines");
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken()]
+        public ActionResult UpdateDoctrine(AccountDoctrinesViewModel viewModel)
+        {
+            // Convert the currently logged-in account id to an integer.
+            int accountId = Conversion.StringToInt32(User.Identity.Name);
+
+            if (ModelState.IsValid)
+            {
+                // Create an Auto Mapper map between the doctrine entity and the view model.
+                Mapper.CreateMap<AccountDoctrinesViewModel, Doctrine>();
+
+                // Sanitise the form values.
+                viewModel.AccountId = accountId;
+                viewModel.Name = Conversion.StringToSafeString(viewModel.Name);
+                viewModel.Description = Conversion.StringToSafeString(viewModel.Description);
+                viewModel.ImageUrl = Server.HtmlEncode(viewModel.ImageUrl) ?? string.Empty;
+
+                // Populate a doctrine with automapper and pass it back to the service layer for update.
+                Doctrine doctrine = Mapper.Map<AccountDoctrinesViewModel, Doctrine>(viewModel);
+                IValidationResult validationResult = this.doctrineShipsServices.UpdateDoctrine(doctrine);
+
+                // If the validationResult is not valid, something did not validate in the service layer.
+                if (validationResult.IsValid)
+                {
+                    TempData["Status"] = "The doctrine was successfully updated.";
+                }
+                else
+                {
+                    TempData["Status"] = "Error: The doctrine was not updated, a validation error occured.<br /><b>Error Details: </b>";
+
+                    foreach (var error in validationResult.Errors)
+                    {
+                        TempData["Status"] += error.Value + "<br />";
+                    }
+                }
+
+                return RedirectToAction("Doctrines");
+            }
+            else
+            {
+                // Re-populate the view model and return with any validation errors.
+                viewModel.Doctrines = this.doctrineShipsServices.GetDoctrineList(accountId);
+                ViewBag.Status = "Error: The doctrine was not updated, a validation error occured.";
+                return View("~/Views/Account/Doctrines.cshtml", viewModel);
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken()]
+        public ActionResult UpdateDoctrineShipFits(AccountDoctrinesViewModel viewModel)
+        {
+            // Convert the currently logged-in account id to an integer.
+            int accountId = Conversion.StringToInt32(User.Identity.Name);
+
+            if (ModelState.IsValid)
+            {
+                IValidationResult validationResult = this.doctrineShipsServices.UpdateDoctrineShipFits(accountId, viewModel.DoctrineId, viewModel.DoctrineShipFitIds);
+
+                // If the validationResult is not valid, something did not validate in the service layer.
+                if (validationResult.IsValid)
+                {
+                    TempData["Status"] = "The doctrine ship fit list was successfully updated.";
+                }
+                else
+                {
+                    TempData["Status"] = "Error: The doctrine ship fit list was not updated, a validation error occured.<br /><b>Error Details: </b>";
+
+                    foreach (var error in validationResult.Errors)
+                    {
+                        TempData["Status"] += error.Value + "<br />";
+                    }
+                }
+
+                return RedirectToAction("Doctrines");
+            }
+            else
+            {
+                // Re-populate the view model and return with any validation errors.
+                viewModel.Doctrines = this.doctrineShipsServices.GetDoctrineList(accountId);
+                ViewBag.Status = "Error: The doctrine ship fit list was not updated, a validation error occured.";
+                return View("~/Views/Account/Doctrines.cshtml", viewModel);
             }
         }
     }
